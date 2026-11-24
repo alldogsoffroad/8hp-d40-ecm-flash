@@ -218,9 +218,19 @@ def edits(stock):
     e(0x68F8E, b"\xE4\x04", b"\xE4\x07", "T2", "target clamp mov #4,r4 -> #7")
     e(0x68F96, b"\xE2\x04", b"\xE2\x07", "T2", "target clamp mov #4,r2 -> #7")
 
-    # G1 - 0xF0ED8 per-gear word table 0x912C (7 entries): 8th aborted (r14=1). 8th now
-    #      reads entry 6 like 7th: 'bf 0xF0FE0' after 'cmp/eq #6,r0' -> nop.
-    e(0xF0FD6, b"\x8B\x03", b"\x00\x09", "G1", "bf 0xf0fe0 -> nop (gear index 7 uses entry 6)")
+    # G1 - 0xF0ED8 per-gear word table 0x912C: index 7 (8th) was aborted (mov #1,r14). The
+    #      7th/8th lookup 0xF0FD4-0xF0FE3 is rewritten so 8th has its own cell:
+    #        f0fd4 mov.l @(0xF11C8),r1   base 0x912C (moved ahead of the compare)
+    #        f0fd6 cmp/eq #6,r0
+    #        f0fd8 bf 0xf0fe0
+    #        f0fda mov.w @(12,r1),r0     7th: entry 6 (stock)
+    #        f0fdc bra 0xf0fe4           (unchanged: also the landing point of cases 1-5)
+    #        f0fde mov r0,r6             (unchanged)
+    #        f0fe0 mov.w @(10,r1),r0     8th: 0x9136, free since P2 moved gears 1-6 away
+    #        f0fe2 mov r0,r6             falls into f0fe4 with r14 = 0
+    e(0xF0FD4, bytes.fromhex("88068b03d17b8516a0026603e600ee01"),
+      bytes.fromhex("d17c88068b028516a00266038515660 3".replace(" ", "")), "G1",
+      "7th/8th lookup: 8th reads its own cell 0x9136 instead of aborting")
     # G2 - 0x52998 gear class -> 0xFFFF2282: target >= 6th fell through and held the
     #      stale value; now classed like 4th/5th: 'bf 0x529d0' after 'cmp/eq #4,r0' -> nop.
     e(0x529C2, b"\x8B\x05", b"\x00\x09", "G2", "bf 0x529d0 -> nop (6th..8th classed like 4th/5th)")
@@ -244,12 +254,13 @@ def edits(stock):
     for tab in (0x112C2, 0x112D2):
         e(tab, stock[tab:tab + 16], struct.pack(">8H", *inv_ratio_interp(words(tab, 5))), "P1",
           f"per-gear 0x{tab:X} (= K/ratio) recomputed for 8HP ratios")
-    # P2 0x912C (= 37 467/ratio) via the F0FD0 literal for gears 1-6; gear 7 keeps the stock
-    #    entry 6 (0.839 -> 0xAE70, exact); gear 8 shares it (its own cell would sit on the
-    #    parameter word @0x913A that 0xF0FEE reads).
+    # P2 0x912C (= 37 467/ratio): gears 1-6 from a new table via the F0FD0 literal; 7th keeps
+    #    the stock entry 6 (0.839 -> 0xAE70, exact); 8th gets its own value in 0x9136 (old entry 5,
+    #    no longer read since the F0FD0 repoint; read by the G1 code for index 7).
     v912 = inv_ratio_interp(words(0x912C, 5))
     lit(0xF0FD0, 0x912C, NEW["912Cx6"], "P2", "0x912C gears 1-6 -> new table (K/ratio)")
     e(NEW["912Cx6"], b"\xFF" * 12, struct.pack(">6H", *v912[:6]), "P2", "new table 912Cx6")
+    e(0x9136, stock[0x9136:0x9138], struct.pack(">H", v912[7]), "P2", "0x9136 = 8th-gear inverse ratio")
     # P3 nearest-ratio, in place: per-gear limit 0x11772
     e(0x11772, stock[0x11772:0x11782],
       struct.pack(">8H", *[words(0x11772, 5)[NEAREST[g]] for g in range(8)]), "P3",

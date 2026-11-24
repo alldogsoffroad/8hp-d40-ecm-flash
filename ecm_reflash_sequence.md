@@ -296,3 +296,19 @@ All as predicted:
 
 **Not covered:** the cut with a running engine (shift flags, ramp, spark retard 0xFFFF234C). That
 needs the truck, or a crank-signal simulator on the bench.
+
+## 12. Re-flash with the 0x912C 8th-gear split (2026-11-23) [O]
+- Image SHA-256 `84af61c712112692fe9f8202d8b84221c49c30a2df9d06089ba0783bfe9b8bb6` (57 edits; G1 rewritten,
+  0x9136 = DB6C). Prediction: as for the earlier flashes.
+- Live run (log `dumps/flash_8gear_v2_log.txt`): seed 601236be, any-key unlock, erase 8.5 s,
+  7 932 blocks in 190 s, verify 02, finalise ok, exit 0. Afterwards the application broadcasts at
+  normal rates.
+- Read-back (`dumps/after_8gear_v2_flash.bin`, 225 s): **0x8200–0xFFFFF identical to the image**
+  (0x9136 = DB6C, 0xF0FD4 = d17c88068b028516a002660385156603). The boot area changed only by the
+  new record at 0x7300 (5 records in the log, 11 slots left). All as predicted.
+- `gear_check.py` repeated on the new software: all four cases as predicted (B3 0x88 → 07 07 08 00 08).
+- 0x912C working value 0xFFFF3384 with the frame set running (B3 0x66 / 0x77 / 0x88 / 0x77):
+  **DB 6C** every time. DB6C is reachable only through the new 8th-gear lookup. The value stays
+  there after dropping to lower gears because the function only steps upward (step-down parameter
+  @0x913C = 0) until its reset path loads @0x9134 (AE70) [V]. This is stock behaviour; the stock
+  ECM latches at AE70.
