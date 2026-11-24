@@ -309,6 +309,30 @@ needs the truck, or a crank-signal simulator on the bench.
 - `gear_check.py` repeated on the new software: all four cases as predicted (B3 0x88 → 07 07 08 00 08).
 - 0x912C working value 0xFFFF3384 with the frame set running (B3 0x66 / 0x77 / 0x88 / 0x77):
   **DB 6C** every time. DB6C is reachable only through the new 8th-gear lookup. The value stays
-  there after dropping to lower gears because the function only steps upward (step-down parameter
-  @0x913C = 0) until its reset path loads @0x9134 (AE70) [V]. This is stock behaviour; the stock
-  ECM latches at AE70.
+  there after dropping to lower gears. **Correction (same day):** I first wrote that a reset path
+  loads @0x9134 (AE70); in this calibration it does not run. Every gate in 0xF0ED8 is a calibration
+  bit (gbr 0xFFFF462C + offset wraps to cal addresses) [V]:
+  - 0x8A95 = 0x49: bit 0 = 1 (on), bit 1 = 0 (not skipped);
+  - 0x8A97 bit 7 = 0: the alternative path 0xF106A is off;
+  - 0x8AAF bit 7 = 0 and 0x869A bit 7 = 0: the branch to the reset / measured-ratio path 0xF1016
+    is never taken;
+  - the step-down parameter @0x913C = 0.
+  Nothing else writes 0xFFFF3384 (its only writers are 0xF1026 and 0xF1056). **So the value only
+  rises and latches at the highest gear's value reached since power-up**, by design: stock latches
+  at AE70 (5th). The output 0xFFFF45C8 = 0xFFFF3384 × 0xFFFF392E is a threshold, compared at
+  0x7A73C and 0x7AEA4 and setting flags gbr+232 bits 4–5 at 0xF110C [V; meaning I]. With the 8HP
+  it latches at 8th (DB6C), the top-gear equivalent of stock's AE70, so the threshold is the
+  8HP's top-gear one. Open: what 0xFFFF392E and the threshold represent.
+- **Power-up check** (`latch_check.py`, reads only, immediately after a user power-cycle; before it,
+  the value had latched at DB6C) [O]:
+  | Moment | 0xFFFF3384 |
+  |---|---|
+  | after power-up, no TCM frames | **1F 0C** (predicted 0000) |
+  | frames 1st (0x11), +0.3 s / +1.5 s | 1F 0C / 1F 0C |
+  | 3rd (0x33), +0.3 s / +1.5 s | **44 34** / 45 7E |
+  | back to 1st, +0.3 s / +1.5 s | 45 7E / 45 7E |
+  **Power-up clears the latch**: the earlier DB6C is gone. The first value differs from my
+  prediction because, with no frames, the gear cells are 0 (1st), and the function had already
+  climbed to 1st's value before the first read. The step 0x1F0C → 0x4434 within ≤0.3 s is about
+  29 steps of 0x148, i.e. one step per ~10 ms pass. The value stays at 3rd's level after dropping to
+  1st, confirming the upward-only latch.
