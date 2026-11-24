@@ -336,3 +336,15 @@ needs the truck, or a crank-signal simulator on the bench.
   climbed to 1st's value before the first read. The step 0x1F0C → 0x4434 within ≤0.3 s is about
   29 steps of 0x148, i.e. one step per ~10 ms pass. The value stays at 3rd's level after dropping to
   1st, confirming the upward-only latch.
+
+## 13. Re-flash with 8th capped at the stock torque-floor factor (2026-11-23, decision B) [O]
+- Image SHA-256 `0c2c2691c9dee6b393ad4a5a8429b69646405aad43d7b78dfda1942ae816cce6` (56 edits; 8th keeps
+  its own 0x912C cell 0x9136, left at the stock AE70 so the torque floor 0xFFFF45C8 keeps its stock
+  magnitude; see `8gear_patch_spec.md`, torque-floor section).
+- Live run (log `dumps/flash_8gear_v3_log.txt`): erase 8.9 s, 7 932 blocks in 187 s, verify 02,
+  finalise ok, exit 0; the application then broadcasts normally.
+- Read-back (`dumps/after_8gear_v3_flash.bin`): **0x8200–0xFFFFF identical to the image**
+  (0x9136 = AE70). The boot area changed only by the new record at 0x7400 (6 records, 10 slots left).
+- `gear_check.py`: all four cases as predicted.
+- With 8th-gear frames (B3 0x88), 0xFFFF3384 = **AE 70**, the stock top value instead of the earlier
+  DB6C, as predicted. **The bench ECM now runs this image.**

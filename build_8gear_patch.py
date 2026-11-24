@@ -255,12 +255,16 @@ def edits(stock):
         e(tab, stock[tab:tab + 16], struct.pack(">8H", *inv_ratio_interp(words(tab, 5))), "P1",
           f"per-gear 0x{tab:X} (= K/ratio) recomputed for 8HP ratios")
     # P2 0x912C (= 37 467/ratio): gears 1-6 from a new table via the F0FD0 literal; 7th keeps
-    #    the stock entry 6 (0.839 -> 0xAE70, exact); 8th gets its own value in 0x9136 (old entry 5,
-    #    no longer read since the F0FD0 repoint; read by the G1 code for index 7).
+    #    the stock entry 6 (0.839 -> 0xAE70, exact). 8th has its own cell 0x9136 (old entry 5, no
+    #    longer read since the F0FD0 repoint; read by the G1 code for index 7), deliberately left
+    #    at the stock 0xAE70 (user decision B, 2026-11-23): the value latches at the highest gear
+    #    reached and scales a minimum-torque floor (0xFFFF45C8, used at 0x7AE70 / 0x7A704), so
+    #    capping 8th at 0.839 keeps that floor at its stock magnitude. The true 8th value would be
+    #    0xDB6C (37 467 / 0.667), giving a floor about 25 % higher.
     v912 = inv_ratio_interp(words(0x912C, 5))
     lit(0xF0FD0, 0x912C, NEW["912Cx6"], "P2", "0x912C gears 1-6 -> new table (K/ratio)")
     e(NEW["912Cx6"], b"\xFF" * 12, struct.pack(">6H", *v912[:6]), "P2", "new table 912Cx6")
-    e(0x9136, stock[0x9136:0x9138], struct.pack(">H", v912[7]), "P2", "0x9136 = 8th-gear inverse ratio")
+    assert stock[0x9136:0x9138] == b"\xAE\x70"     # 8th cell = stock AE70 (cap, decision B)
     # P3 nearest-ratio, in place: per-gear limit 0x11772
     e(0x11772, stock[0x11772:0x11782],
       struct.pack(">8H", *[words(0x11772, 5)[NEAREST[g]] for g in range(8)]), "P3",
