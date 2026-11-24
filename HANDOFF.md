@@ -46,7 +46,7 @@ session on 2026-11-20 to 2026-11-23. Paths were checked to exist on that date.
 
 ## 3. Photos provided by the user
 
-All in `/home/chadk/Downloads/`.
+Kept outside the repository; the three used here are in `photos/`.
 
 | File | Shows |
 |---|---|
@@ -99,7 +99,7 @@ Two of these should not be relied on:
 
 ## 6. Files in this workspace
 
-`/home/chadk/Documents/Nissan ECU/`
+This repository's folder.
 
 | File | Contents |
 |---|---|

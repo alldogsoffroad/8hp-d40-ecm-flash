@@ -45,7 +45,7 @@ retention isn't needed for dumping).
 ### 32-way ("E55") terminal map — CONFIRMED from 2015 FSM EC-533 (fig JSBIA0505ZZ)
 
 Source: 2015 Frontier FSM EC section, page EC-533, "ECM Harness Connector Terminal Layout"
-(nicoclub `service-manual?fsm_download=Frontier/2015/EC.pdf`; local copy /tmp/fsm2015/EC.pdf,
+(nicoclub `service-manual?fsm_download=Frontier/2015/EC.pdf`,
 page 533 rendered at 300 DPI). The drawing is marked **"H.S." (harness side)** — so when
 looking directly into the **ECU's own connector face, the left-right order is MIRRORED**
 relative to this map. Rows/columns and the arithmetic are unchanged; only left↔right flips.

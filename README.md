@@ -32,6 +32,7 @@ All work so far is on a bench ECM (engine never running):
 | Gear 8 accepted from the transmission controller (0x174) | ✔ bench: gear cells read 8th |
 | Torque-cut request path for upshifts into 6th–8th | ✔ ROM emulation + bench (engine stopped) |
 | Torque cut applied with the engine running | ✘ needs the truck (or a crank-signal simulator) |
+| Torque cut on **downshifts** | ✔ usable as is: the stock TCM does request downshift cuts (seen on a power-on 4→3: B4 ≈ 10 % for ~100 ms). The ECM's downshift map is 4×4, but every 8HP downshift except into 1st falls in the same cell as the stock 4→3 (verified by executing the ROM). Untested with a running engine ([spec](8gear_patch_spec.md), section T) |
 | Other ECM part / software numbers | ✘ only 9CJ3A is supported; the builder refuses other images |
 | Drive testing | ✘ not started |
 

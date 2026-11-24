@@ -3,7 +3,10 @@
 ECM 23710-9CF0A, software 9CJ3A, SH7058 (1 MB), diagnostics on CAN 0x7E0/0x7E8, ISO-TP, frames
 padded to 8 bytes. Decoded 2026-11-23 from `dumps/dh1_9CJ3A_pass1.bin` (desk only); external
 references read as text, never run: RomRaider `TestJ2534NCS.java` + `NcsCoDec.java`, nissutils
-`nislib.c` / `romdb/keysets.csv`. **Nothing has been sent to the ECM beyond the earlier reads.**
+`nislib.c` / `romdb/keysets.csv`. Sections 1–7 were written before any bench work and kept as the
+record of the predictions; **from §5a on, the results come from the bench**: the loader was
+entered, unlocked and used to flash the stock image and three versions of the 8-gear image
+(§8–§13).
 [V] = read in this ROM's disassembly; [E] = confirmed by executing the ROM routine in
 `sh2_mini.py` (see `ncs_keys.py`); [R] = reference code; [I] = inference.
 
@@ -131,7 +134,8 @@ Residual risks, in order:
 
 Failure modes before the erase change nothing. After the erase they leave the loader running
 (§3), so the recovery is to write the stock image again with the same sequence.
-No flashing tool exists yet: `ncs_keys.py` has the coding (enc1, CRC, frame builder), and a
+(At the time of writing no flashing tool existed; `ncs_flash.py` was written afterwards, see §7.)
+`ncs_keys.py` has the coding (enc1, CRC, frame builder), and a
 writer would still need the ISO-TP sender with flow control.
 
 ## 5a. CORRECTION after bench step B (2026-11-23)
@@ -198,7 +202,8 @@ wrong-key path needs `27 82`, which step B does not send.
   - A one-byte-corrupted image is refused (ROM16_A). Live mode refuses without `--confirm`
     matching the image SHA-256 and without typing FLASH.
 - **Live:**
-  `python3 ncs_flash.py dumps/dh1_9CJ3A_8gear.bin --live --port /dev/ttyACM0 --confirm 906ae047ec40`
+  `python3 ncs_flash.py dumps/dh1_9CJ3A_8gear.bin --live --port /dev/ttyACM0 --confirm <first 12 hex of the image SHA-256>`
+  (the current image, §13, is `0c2c2691c9de…`)
 - **The record** written by `34 83` defaults to a copy of the stock 0x7000 record (9CJ3A
   identity), so `21 FF` keeps answering the same; `--record-hex` overrides it.
 - **What the dry run cannot prove:** the simulation is built from my decode, so it tests the tool

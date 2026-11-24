@@ -3,7 +3,7 @@
 ECM 23710-9CF0A (DH1), software **9CJ3A**, SH7058, 1 MB. Stock image `dumps/dh1_9CJ3A_pass1.bin`
 (SHA-256 `7972aa88…61e1ad`). Builder: `build_8gear_patch.py` → `dumps/dh1_9CJ3A_8gear.bin`
 (SHA-256 `0c2c2691c9dee6b393ad4a5a8429b69646405aad43d7b78dfda1942ae816cce6`, with the 8HP70 calibration below), edit list
-`dumps/8gear_edits.txt`. Written 2026-11-23, desk only: **nothing has been written to the ECM.**
+`dumps/8gear_edits.txt`. Written 2026-11-23. **This image is flashed on the bench ECM and verified by read-back** (`ecm_reflash_sequence.md` §13).
 
 Tags: [V] = read in the disassembly (`sh-elf-objdump -b binary -m sh2e -EB`) or the dump;
 [I] = inference. RAM cells: 0xFFFF1090 = engaged gear − 1, 0xFFFF1091 = target gear − 1 (from
@@ -14,17 +14,17 @@ AT calibration, cal 0x869A bit 7 = 0, code 0x755AE–0x755BC) [V].
 
 1. **Gear 8 must get through** wherever the code rejects it (nibble limits, classification
    chains, the abort in 0xF0ED8).
-2. **Every 5-entry gear table gets an 8-entry table** in free space and its clamp is raised to 7.
-   Entries for 6th–8th are filled with the stock 5th-gear value: that is exactly what the stock
-   ECM already applies to gears 6 and 7 through its clamp, so no gear sees a value the stock ECM
-   does not use today, and each gear now has its own cell to calibrate later.
-3. **Where Nissan's code already handles gears 6/7 explicitly**, it is left alone (the 8-entry
-   tables, the 8×8 maps, the gear list 0xFF80, the top-gear test at 0x7BABC); gear 8 follows the
-   same path as 7.
+2. **Every 5-entry gear table gets an 8-entry table** in free space and its clamp is raised to 7,
+   so each gear has its own cell. (The first version filled 6th–8th with the stock 5th-gear value;
+   the 8HP70 calibration, section P, replaced that with nearest-ratio values and ratio-derived
+   recomputation.)
+3. **Where Nissan's code already handles gears 6/7 explicitly**, the structure is left alone (the
+   8-entry tables, the 8×8 maps, the gear list 0xFF80); gear 8 follows the same path as 7. Their
+   values are recalibrated in section P, and the top-gear test 0x7BABC is changed by P7.
 4. **Calibration:** the ECM's own 8-entry ratio tables get the true 8HP ratios (D-N5), and the
    1..5 gear window becomes 1..8.
 
-Free space used: **0x19900–0x19937** (56 bytes) of the erased 0x1988C–0x1FFFF [V: all FF, no
+Free space used: **0x19900–0x19947** (72 bytes) of the erased 0x1988C–0x1FFFF [V: all FF, no
 literal or table points into it]. The patch changes bytes in both 0x8200–0x1FFFF and
 0x20000–0xFFFFF, so it needs the **full application range** (0x8200–0xFFFFF), not the
 calibration-only range.
@@ -75,9 +75,21 @@ third path indexes **0xF9BC** with the target clamped to 1..4 (0x68F8E/0x68F96; 
 Change: T1 7-entry copies at **0x19920** (99 ×7) and **0x19928** (57 ×7), literals 0x69054 /
 0x69058, clamps `#4` → `#7` (upshifts into 2nd…8th get their own cell); T2 8-entry copy at
 **0x19930** (00 ×8), literal 0x69060, clamps `#4` → `#7`.
-Not changed: the downshift path uses the 4×4 map 0xB3B4 with engaged clamped to 1..4 and target
-to 0..3; its result is multiplied by B4 (`mulu.w` with @0xFFFF3910 at 0x68FE4), so with no cut
-on downshifts (D-N5: cut gated on upshift) it stays 0 [V code, I for the TCU behaviour].
+Not changed: the downshift path uses the 4×4 map 0xB3B4 (`03 01 01 01 03 01 01 01 03 02 01 01
+03 01 00 01`) with engaged clamped to 1..4 and target to 0..3, and its result is multiplied by B4
+(`mulu.w` with @0xFFFF3910 at 0x68FE4) [V]. So **every downshift from 6th, 7th or 8th uses the
+stock 5→4 cell** (the emulation gives identical outputs for 8→7 and 5→4) [E].
+**Is the path used? Yes.** 8hp-tcu-open sends the cut on up- and downshifts (`nissan_out.c`,
+`nissan_tx.c`; review 2026-11-24). The stock Nissan TCM also requests downshift cuts: the truck
+logs (`2026-09-1*_torque_*.txt`) show a power-on **4→3 downshift** (code 9, pedal ~31 %, ~280 Nm)
+with **B4 = 0x1A (~10 %) for ~100 ms** [O]. That is 1 of only 4 downshift events logged; the two
+5→4 at ≤ 32 % pedal had none. (The earlier note "B4 non-zero only during upshifts" was based on
+logs aimed at upshifts and is wrong.)
+**Effect of the 4×4 clamp, executing the patched ROM** (B4 0x1A) [E]: class from 0xB3B4 = 3 for
+2→1, and **1 for every other downshift, 3→2 … 8→7 including skips (8→6, 6→4)**, with identical
+outputs. So every 8HP downshift except into 1st uses the same cell as the stock 4→3, the case the
+stock TCM was seen cutting in. **Conclusion: no patch and no TCU restriction needed**; keep
+downshift cut amounts near the stock size (~10 %) until a drive test shows otherwise.
 
 ### G – gear paths that drop gear 8 / gears 6–8
 | Id | Address | Stock [V] | Change |
@@ -110,10 +122,10 @@ All 75 loaders of 0xFFFF108E–1095/1505 were scanned for gear constants [V]. Un
 the code already copes with 6–8 or the result is the stock 5th-gear behaviour:
 8-entry clamp-7 users (0x3F298, 0x67E6E, 0x75FFC, 0x7AA42, 0x7F034/7F044, 0x7F0D2, 0x7F4FA,
 0x7FF24, 0x8034C); 8×8 maps 0xB314 / 0xE48C (only upshifts from 1st–3rd non-zero); 0x11772,
-0x112C2/0x112D2 (padded with the 5th value); 4×4 maps on axis 0xF7B0 = 0..3 (0x7F2AC, 4th+ uses
-the last row); gear list 0xFF80 = 2,2,3,4,5,6,7,8 (0x4FBD0 finds 8 correctly); 0x6898E (only
-targets 2nd–4th); top-gear test 0x7BABC (`engaged ≥ 5th and target ≥ 5th`, 5th unconditional,
-6th+ conditional: Nissan's own handling of higher gears); legality table 0x167A4 (check
+0x112C2/0x112D2 (structure; values recomputed in P1); 4×4 maps on axis 0xF7B0 (structure; own
+gear axis in P5); gear list 0xFF80 = 2,2,3,4,5,6,7,8 (0x4FBD0 finds 8 correctly); 0x6898E (only
+targets 2nd–4th); the top-gear test 0x7BABC was first left as Nissan's own handling of 6th+ and
+is now changed by P7; legality table 0x167A4 (check
 calibrated off, cal 0x13C7A bit 4 = 0); substitute handlers 0xE4AFE/0xE4BCA (loss of 0x174).
 
 ## Predictions for the bench (RAM reads over 0x23 are allowed)
@@ -123,11 +135,10 @@ Stock ECM today, TCU sending target nibble 8: **0xFFFF1091 = 00** (reads as 1st)
 Gear-cut cells on an upshift into 8th read the new tables (0x19920: 0x99 first step).
 
 ## Open
-- K1/K3 and the 5th-value fill are defensible defaults, not a drive calibration: the 8 ratio
-  cells, the per-gear tables (0x19900–0x19937) and the window should be reviewed against the
-  8HP shift points before driving.
-- The meaning of most per-gear tables (B, G1, G2, the R1–R4 outputs) is not decoded [I].
-- Whether the reflash path accepts this image is a separate question: `ecm_reflash_sequence.md`.
+- The per-gear calibration (section P) is a ratio-matched starting point, not a drive
+  calibration; the tables' meanings are decoded below, but the values still need drive validation.
+- The downshift cut path (0xB3B4) is 4×4, but every 8HP downshift except into 1st uses the stock 4→3 cell; it needs a running-engine test (section T).
+- The reflash path is decoded and proven: `ecm_reflash_sequence.md` §2–§13.
 
 ## P - 8HP70 per-gear calibration (user, 2026-11-23: "match all per-gear values to the 8hp70")
 **Method.** Each 8HP gear takes the stock value of the RE5R05A gear with the nearest ratio (log
