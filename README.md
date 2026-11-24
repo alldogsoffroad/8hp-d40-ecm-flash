@@ -73,6 +73,12 @@ This modifies an engine computer. The calibration for gears 6–8 is a ratio-mat
 point derived from the stock 5-speed calibration, not a validated tune. Use at your own risk, off
 public roads, and check emissions rules where you live.
 
+## Credits
+
+This work builds on RomRaider, fenugrec's nissutils / nisprog / freediag, python-can, GNU
+Binutils, the 2015 Frontier service manual and other sources; see
+[ATTRIBUTION.md](ATTRIBUTION.md) for what was used where.
+
 ## License
 
 GPL-3.0, see [LICENSE](LICENSE).
