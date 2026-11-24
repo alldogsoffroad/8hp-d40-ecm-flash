@@ -1,0 +1,4 @@
+dumps/
+__pycache__/
+*.pyc
+firmware/build/

@@ -1,0 +1,153 @@
+# 8-forward-gear ECM patch: spec (D-N5)
+
+ECM 23710-9CF0A (DH1), software **9CJ3A**, SH7058, 1 MB. Stock image `dumps/dh1_9CJ3A_pass1.bin`
+(SHA-256 `7972aa88…61e1ad`). Builder: `build_8gear_patch.py` → `dumps/dh1_9CJ3A_8gear.bin`
+(SHA-256 `820f9016a2c9bb1578676bed1e1b49e9248a69911310faad917a4efb44fcc1ee`, with the 8HP70 calibration below), edit list
+`dumps/8gear_edits.txt`. Written 2026-11-23, desk only: **nothing has been written to the ECM.**
+
+Tags: [V] = read in the disassembly (`sh-elf-objdump -b binary -m sh2e -EB`) or the dump;
+[I] = inference. RAM cells: 0xFFFF1090 = engaged gear − 1, 0xFFFF1091 = target gear − 1 (from
+0x174 B3), 0xFFFF108E/108F = copies of them, 0xFFFF1505 = engaged gear number (= 1090 + 1 on this
+AT calibration, cal 0x869A bit 7 = 0, code 0x755AE–0x755BC) [V].
+
+## Design rules
+
+1. **Gear 8 must get through** wherever the code rejects it (nibble limits, classification
+   chains, the abort in 0xF0ED8).
+2. **Every 5-entry gear table gets an 8-entry table** in free space and its clamp is raised to 7.
+   Entries for 6th–8th are filled with the stock 5th-gear value: that is exactly what the stock
+   ECM already applies to gears 6 and 7 through its clamp, so no gear sees a value the stock ECM
+   does not use today, and each gear now has its own cell to calibrate later.
+3. **Where Nissan's code already handles gears 6/7 explicitly**, it is left alone (the 8-entry
+   tables, the 8×8 maps, the gear list 0xFF80, the top-gear test at 0x7BABC); gear 8 follows the
+   same path as 7.
+4. **Calibration:** the ECM's own 8-entry ratio tables get the true 8HP ratios (D-N5), and the
+   1..5 gear window becomes 1..8.
+
+Free space used: **0x19900–0x19937** (56 bytes) of the erased 0x1988C–0x1FFFF [V: all FF, no
+literal or table points into it]. The patch changes bytes in both 0x8200–0x1FFFF and
+0x20000–0xFFFFF, so it needs the **full application range** (0x8200–0xFFFFF), not the
+calibration-only range.
+
+## Edits (56 edits, 254 bytes including checksums; the P edits are the 8HP70 calibration)
+
+### S – 0x174 decoder (handler 0xE297C area)
+| Id | Address | Stock behaviour [V] | Change |
+|---|---|---|---|
+| S1 | 0xE26E8 `E6 08` | target nibble: `mov #8,r6; …; cmp/ge r6,r2; bt 0xE2706` → nibble ≥ 8 writes **0** (1st) to 0xFFFF1091 | `mov #9,r6`: nibble 8 → 0xFFFF1091 = 7 |
+| S2 | 0xE2826 `E2 08` | engaged nibble: `mov #8,r2; and #15,r0; cmp/ge r2,r0; bt 0xE283C` → ≥ 8 writes 0 to 0xFFFF1090 | `mov #9,r2` |
+| S3 | 0xE271A–0xE2721 | target nibble → 0xFFFF283F: chain `cmp/eq #1..#7 → 0`, 9 → 4, 0/10 → 3, 11/15 → 0; **8 is not listed: the cell keeps its old value** | `add #-1,r0; tst #0xF8,r0; bt 0xE274E; add #1,r0` replaces the `==1`/`==2` tests: 1..8 → 0. The remaining `==3..7` tests never match; 9/10/11/15 unchanged |
+| S4 | 0xE2760–0xE2767 | target nibble → 0xFFFF2620: 1..7 → 8, 0/10 → 4, 9 → 2, 11/15 → 8; 8 not listed | same range test, `bt 0xE27D8`: 1..8 → 8 |
+
+Disassembly after S3 (patched image): `e271a add #-1,r0 / e271c tst #248,r0 / e271e bt 0xe274e /
+e2720 add #1,r0 / e2722 cmp/eq #3,r0 …`. Nibble 0 is caught earlier (`e2716 tst r0,r0; bt`), so
+the range test only sees 1..15. The second gear writer 0xE1B48 (3-bit fields) is the handler of
+ID **0x251** (dispatch `e0e54 mov.w 0x4A20; cmp/eq; bt 0xe0f22`), which is not in the ECM's
+receive table at 0x97B8 [V], so it never runs; not patched.
+
+### R – the four users of the 5-entry ratio table 0x1247E
+0x1247E holds 5 words (3.842/2.353/1.529/1.000/0.839 ×1024) and is followed directly by the
+8-entry 0x12488, so raising a clamp alone would read the wrong table. Each user is repointed to
+0x12488 (which K2 fills with 8HP ratios) and its clamp raised to 7.
+| Id | Literal pool | Clamps (`mov #4` → `#7`) | Stock code [V] |
+|---|---|---|---|
+| R1 | 0x44EBC | 0x44E1A (r10), 0x44E26 (r6) | `cmp/gt r10,r12; bf.s; mov #4,r6; mov.l →1247E; mov.w @(r0,r13)` index 0xFFFF108E; result × speed → 0xFFFF157C+4 |
+| R2 | 0x4E6B8 | 0x4E4AE (r4), 0x4E4B6 (r6) | `cmp/hi r4,r0; …; mulu.w ratio,@(86,gbr); >>10` → 0xFFFF157A |
+| R3 | 0x9B838 | 0x9B78A (r2), 0x9B792 (r6) | only when engaged = target (0xFFFF1090 = 1091); → 0xFFFF1EC6 |
+| R4 | 0xF18C0 | 0xF16F2 (r2), 0xF16F8 (r6) | index = min(108E, 108F); ratio × 0xFFFF10E4 + cal 0x8F5A |
+Register check: the clamp registers are overwritten before any later read (r10 at 0x44F28, r4 at
+0x4E4B8, r2 at 0x9B79C and 0xF172E) [V]. Each pool word has exactly one loader [V].
+
+### B – byte tables 0xF700 / 0xF705 / 0xF70A / 0xF70F (function 0x67A5C, enabled by cal 0x8AA6 bit 3 = 1)
+Stock [V]: `mov.l →108E; mov #4,r5; mov.b @r2,r6; cmp/hi r5,r6; bf; mov #4,r6` then
+`mov.b @(r0,r11)` from two of the four 5-byte tables (gbr flag bit 5 picks the pair). Stock data:
+F700 = 00 00 00 00 64, F705 = 00 00 00 00 64, F70A = 00 00 00 00 3C, F70F = 00 00 00 00 3C
+(only 5th gear non-zero).
+Change: four 8-byte tables at **0x19900 / 0x19908 / 0x19910 / 0x19918** (= stock + 5th value
+for 6–8), literals 0x67CB4 / 0x67CA4 / 0x67CB0 / 0x67CA0 repointed, clamps 0x67A7C and 0x67A84
+`#4` → `#7`.
+
+### T – torque-intervention scaling (0x177 B4, function 0x68E62; B4 lives in 0xFFFF3910)
+Stock [V]: upshift path `mov.l →108E; @(1,r7) = target; clamp to 1..4 (0x68F14/0x68F1A); add #-1`
+→ index 0..3 into **0x10409** (first step, 4 × 0x99 = 60 %) and **0xF9C1** (4 × 0x57); the
+third path indexes **0xF9BC** with the target clamped to 1..4 (0x68F8E/0x68F96; bytes F9BD–F9C0
+= 00, and 0xF9C1 starts right after, so a raised clamp would overrun into the next table).
+Change: T1 7-entry copies at **0x19920** (99 ×7) and **0x19928** (57 ×7), literals 0x69054 /
+0x69058, clamps `#4` → `#7` (upshifts into 2nd…8th get their own cell); T2 8-entry copy at
+**0x19930** (00 ×8), literal 0x69060, clamps `#4` → `#7`.
+Not changed: the downshift path uses the 4×4 map 0xB3B4 with engaged clamped to 1..4 and target
+to 0..3; its result is multiplied by B4 (`mulu.w` with @0xFFFF3910 at 0x68FE4), so with no cut
+on downshifts (D-N5: cut gated on upshift) it stays 0 [V code, I for the TCU behaviour].
+
+### G – gear paths that drop gear 8 / gears 6–8
+| Id | Address | Stock [V] | Change |
+|---|---|---|---|
+| G1 | 0xF0FD6 `8B 03` | 0xF0ED8 (enabled, cal 0x8A95 bit 0 = 1): index = max(108E,108F); `cmp/eq #0..#6` read word 0x912C[i] (2618 3E33 5FB8 925A AE70 AE70 AE70); **index 7 → `mov #0,r6; mov #1,r14` = abort** | `bf 0xF0FE0` → `nop`: index 7 reads entry 6 (AE70) like 7th |
+| G2 | 0x529C2 `8B 05` | 0x52998: class of target gear → 0xFFFF2282: 1st → 2, 2nd → 2, 3rd → 2/3, 4th/5th → 4/5; **6th+ falls through and the cell keeps a stale value** (or 1 with flag) | `bf 0x529D0` → `nop`: 6th–8th classed like 4th/5th |
+
+### K – calibration
+| Id | Address | Stock | Patched |
+|---|---|---|---|
+| K1 | 0x86B8 | 05: window `0x86B9 (1) ≤ 0xFFFF1505 ≤ 0x86B8 (5)` at 0x7575E and 0x75784 [V] | **08** (all forward gears, the cal's intent [I]) |
+| K2 | 0x12488 and 0x141A6 | 3.842 2.353 1.529 1.000 0.839 0.839 0.839 0.839 | **4.714 3.143 2.106 1.667 1.285 1.000 0.839 0.667** (×1024: 12DB 0C92 086D 06AB 0524 0400 035B 02AB) |
+| K3 | literals 0x7BA0C, 0x7BC70 | code reads ratio[5] directly (0x12492 = 0.839, the stock top-gear ratio) | → 0x12494 (ratio[6] = 8HP 7th = 0.839): value read unchanged |
+
+## Checksums (all four reproduced from the stock image byte for byte)
+| Name | Stored at | Definition | Evidence |
+|---|---|---|---|
+| ROM16_A | word 0x20000 | 16-bit word sum 0x20002–0xFFFFF | boot code 0x2AC2–0x2B46 compares it; start pointer 0x20002 set at 0x12EA [V] |
+| ROM16_B | word 0x8200 | 16-bit word sum 0x8202–0x1FFFF | same routine, pointer 0x8202 [V] |
+| ALT | u32 0x20404 / 0x20408 | sum32 / xor32 of 0x2040C–0x221A7 | nissutils `validate_altcks` [V on stock] |
+| ALT2 | u32 0x96E0 / 0x96D8 | sum32 / xor32 of 0x8204–0xFFFFF except the u32 at 0x20000 and the two result words | nissutils `checksum_alt2` [V on stock] |
+Fix order ALT → ROM16_A → ALT2 → ROM16_B (each later range contains the earlier result).
+`--selftest` re-runs the fixer on the stock dump and gets the identical image. Patched values:
+ALT unchanged, ALT2 D60A873B / CBB97407, A BA83, B 57EC. Not a gate: 0xEDB50 computes a 32-bit
+value over 0x8200–0xFFFFF into RAM (the OBD **CVN**, [I]); it will differ from stock. The boot
+block's RIPEMD-160 (0x798) hashes a RAM download buffer (0xFFFF8500), not a stored ROM digest.
+
+## Reviewed, deliberately not changed
+All 75 loaders of 0xFFFF108E–1095/1505 were scanned for gear constants [V]. Unchanged because
+the code already copes with 6–8 or the result is the stock 5th-gear behaviour:
+8-entry clamp-7 users (0x3F298, 0x67E6E, 0x75FFC, 0x7AA42, 0x7F034/7F044, 0x7F0D2, 0x7F4FA,
+0x7FF24, 0x8034C); 8×8 maps 0xB314 / 0xE48C (only upshifts from 1st–3rd non-zero); 0x11772,
+0x112C2/0x112D2 (padded with the 5th value); 4×4 maps on axis 0xF7B0 = 0..3 (0x7F2AC, 4th+ uses
+the last row); gear list 0xFF80 = 2,2,3,4,5,6,7,8 (0x4FBD0 finds 8 correctly); 0x6898E (only
+targets 2nd–4th); top-gear test 0x7BABC (`engaged ≥ 5th and target ≥ 5th`, 5th unconditional,
+6th+ conditional: Nissan's own handling of higher gears); legality table 0x167A4 (check
+calibrated off, cal 0x13C7A bit 4 = 0); substitute handlers 0xE4AFE/0xE4BCA (loss of 0x174).
+
+## Predictions for the bench (RAM reads over 0x23 are allowed)
+Stock ECM today, TCU sending target nibble 8: **0xFFFF1091 = 00** (reads as 1st), 0xFFFF283F and
+0xFFFF2620 unchanged from the previous frame. Patched ECM: 0x174 B3 = 0x88 → **1090 = 1091 = 07,
+1505 = 08, 283F = 00, 2620 = 08**; B3 = 0x76 (target 7th = high nibble, engaged 6th = low nibble) → 1091 = 06, 1090 = 05, 1505 = 06.
+Gear-cut cells on an upshift into 8th read the new tables (0x19920: 0x99 first step).
+
+## Open
+- K1/K3 and the 5th-value fill are defensible defaults, not a drive calibration: the 8 ratio
+  cells, the per-gear tables (0x19900–0x19937) and the window should be reviewed against the
+  8HP shift points before driving.
+- The meaning of most per-gear tables (B, G1, G2, the R1–R4 outputs) is not decoded [I].
+- Whether the reflash path accepts this image is a separate question: `ecm_reflash_sequence.md`.
+
+## P - 8HP70 per-gear calibration (user, 2026-11-23: "match all per-gear values to the 8hp70")
+**Method.** Each 8HP gear takes the stock value of the RE5R05A gear with the nearest ratio (log
+distance): 8HP 1st–8th → RE5 **1, 1, 2, 3, 3, 4, 5, 5** (`NEAREST` in the builder).
+Exception: tables whose stock data satisfy value × ratio = constant are speed-per-gear quantities
+and are **recomputed from the true 8HP ratio**. They are interpolated in 1/ratio through the five
+stock points, which is exact at the two ratios the gearboxes share, 1.000 and 0.839. This
+replaces the earlier "6th–8th = stock 5th" fill for the B and T tables.
+| Id | Table | Stock (RE5 1st–5th) | 8HP 1st–8th |
+|---|---|---|---|
+| P1 | 0x112C2 and 0x112D2 (value × ratio ≈ 7 550), in place | 07AF 0C6C 135A 1D6A 2344 | 064C 0959 0DEE 11B7 16F7 **1D6A 2344** 2CA3 |
+| P2 | 0x912C (× ratio = 37 467) → new 0x19938 for 1st–6th via literal 0xF0FD0 | 2618 3E33 5FB8 925A AE70 | 1F0C 2E91 457E 57CB 71E5 925A, 7th = stock AE70 (exact); **8th shares 7th** (its own cell would sit on the parameter word 0x913A read at 0xF0FEE) |
+| P3 | 0x11772, in place | 7FFF 7FFF 00C8 7FFF 7FFF | 7FFF 7FFF 7FFF 00C8 00C8 7FFF 7FFF 7FFF (the stock 3rd-gear limit 0x00C8 now applies in 4th/5th) |
+| P4 | 8×8 shift matrices 0xB314 / 0xE48C [engaged][target] (axes from 0x7EF16/0x7EF28), in place | values only on upshifts from 1st–3rd | shift i→j = RE5 shift NEAREST[i]→NEAREST[j]; when both map to the same RE5 gear, the adjacent RE5 shift in the same direction |
+| P5 | gear axis of the 4×4 maps 0xB374/B384/B394 (0x7F2AC, target gear): literal 0x7F37C → own axis 0x19944 | 0,1,2,3 | **1,2,3,5**: 1st/2nd → RE5 1st row, 3rd → 2nd, 4th → 3rd, 5th → interpolated 3rd/4th, 6th–8th → 4th+ row. 0xF7B0 itself is unchanged (0x7F9C2 uses it with input 0xFFFF261D, not a gear) |
+| P6 | 0xFF8F (index from the 0xFF80 gear-list search), in place | 5 5 5 4 3 | 5 5 5 5 5 4 3 3 |
+| P7 | top-gear test 0x7BABC/0x7BACC/0x7BAD2 | engaged & target ≥ 5th | ≥ **7th** (= RE5 5th, 0.839), 7th and 8th unconditional |
+| B1 | 0xF700/05/0A/0F copies (0x19900…) | 0 0 0 0 X | 0 0 0 0 0 0 X X |
+| T1/T2 | upshift scaling 0x19920/0x19928, 0x19930 | uniform (0x99 / 0x57 / 00) | unchanged values |
+Not converted (raw gear-number logic, not table values): G2 class 0x52998 (6th+ like 4th/5th);
+the downshift 4×4 0xB3B4 (inactive while the TCU sends no cut on downshifts); the
+"engaged ≥ target + 2" skip-shift test in 0x7F2AC. The meaning of most tables is still [I]; the
+calibration reproduces the RE5 behaviour per ratio, it is not a drive-validated 8HP calibration.
